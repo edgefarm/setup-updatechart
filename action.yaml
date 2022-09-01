@@ -1,0 +1,14 @@
+name: Setup updateChart
+description: Adds updateChart to PATH.
+author: Armin Schlegel <armin.schlegel@gmx.de>
+branding:
+  icon: "edit"
+  color: "yellow"
+
+runs:
+  using: composite
+  steps:
+    - run: sudo cp "$GITHUB_ACTION_PATH/updateChart" /usr/local/bin
+      shell: bash
+    - run: sudo chmod +x /usr/local/bin/updateChart
+      shell: bash

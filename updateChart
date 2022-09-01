@@ -1,0 +1,165 @@
+#!/bin/bash
+
+set -e
+set -o nounset
+set -o pipefail
+
+dependencies_names=()
+chart=
+new_version=
+keep_version="0"
+
+# returns the index of the dependency in the chart
+# $1 - dependency name
+# if the dependency is not found, returns -1
+get_dependency_index() {
+    local dependency=${1}
+    index=$(yq eval '.dependencies[].name' ${chart} | grep -rn "\b${dependency}\b" - | cut -f1 -d":")
+    index=$((${index} - 1))
+    echo ${index}
+}
+
+# returns the version of the upstream dependencies helm chart
+# $1 - repository of upstream helm chart
+# returns the version of the upstream dependencies helm chart
+# returns -1 if the dependency is not found
+get_upstream_dependency_version() {
+    local repository=${1}
+    local chart=${2}
+    IFSBACKUP=${IFS}
+    IFS=""
+    ret=$(helm show chart ${repository}/${chart})
+    if [ ${?} -ne 0 ]; then
+        exit 1
+    else
+        version=$(echo "${ret}" | yq '.version' -)
+        echo ${version}
+    fi
+    IFS=${IFSBACKUP}
+}
+
+get_dependencies_names() {
+    dependencies_names=($(yq eval '.dependencies[].name' ${chart}))
+}
+
+show_help() {
+cat << EOF
+Usage: $(basename "$0") <options>
+    -h, --help               Display this help
+    -c, --chart              Chart.yaml to update
+    -v, --new-version        New version to set for the chart
+    -k, --keep-version       Keep the old version of the chart
+EOF
+}
+
+parse_command_line() {
+    # Check if the script was called with the right number of arguments
+    if [ $# -eq 0 ]; then
+        show_help
+        exit 1
+    fi
+    
+    while :; do
+        case "${1:-}" in
+            -h|--help)
+                show_help
+                exit
+            ;;
+            -c|--chart)
+                if [[ -n "${2:-}" ]]; then
+                    chart="$2"
+                    shift
+                else
+                    echo "ERROR: '--chart' cannot be empty." >&2
+                    show_help
+                    exit 1
+                fi
+            ;;
+            -v | --new-version)
+                if [[ -n "${2:-}" ]]; then
+                    new_version="$2"
+                    shift
+                else
+                    echo "ERROR: '--new-version' cannot be empty." >&2
+                    show_help
+                    exit 1
+                fi
+            ;;
+            -k | --keep-version)
+                keep_version="1"
+            ;;
+            *)
+                break
+            ;;
+        esac
+        shift
+    done
+    
+    if [ "${keep_version}" -eq "0" ] && [ -z "${new_version}" ]; then
+        echo "ERROR: '--new-version' cannot be empty." >&2
+        show_help
+        exit 1
+    fi
+}
+
+# Checks versions
+# Taken from https://stackoverflow.com/a/48487783/18655480
+# Many thanks!
+function V() # $1-a $2-op $3-$b
+# Compare a and b as version strings. Rules:
+# R1: a and b : dot-separated sequence of items. Items are numeric. The last item can optionally end with letters, i.e., 2.5 or 2.5a.
+# R2: Zeros are automatically inserted to compare the same number of items, i.e., 1.0 < 1.0.1 means 1.0.0 < 1.0.1 => yes.
+# R3: op can be '=' '==' '!=' '<' '<=' '>' '>=' (lexicographic).
+# R4: Unrestricted number of digits of any item, i.e., 3.0003 > 3.0000004.
+# R5: Unrestricted number of items.
+# Example: 3.6 '>' 3.5b
+{
+    local a=$1 op=$2 b=$3 al=${1##*.} bl=${3##*.}
+    while [[ $al =~ ^[[:digit:]] ]]; do al=${al:1}; done
+    while [[ $bl =~ ^[[:digit:]] ]]; do bl=${bl:1}; done
+    local ai=${a%$al} bi=${b%$bl}
+    
+    local ap=${ai//[[:digit:]]} bp=${bi//[[:digit:]]}
+    ap=${ap//./.0} bp=${bp//./.0}
+    
+    local w=1 fmt=$a.$b x IFS=.
+    for x in $fmt; do [ ${#x} -gt $w ] && w=${#x}; done
+    fmt=${*//[^.]}; fmt=${fmt//./%${w}s}
+    printf -v a $fmt $ai$bp; printf -v a "%s-%${w}s" $a $al
+    printf -v b $fmt $bi$ap; printf -v b "%s-%${w}s" $b $bl
+    
+    case $op in
+        '<='|'>=' ) [ "$a" ${op:0:1} "$b" ] || [ "$a" = "$b" ] ;;
+        * )         [ "$a" $op "$b" ] ;;
+    esac
+}
+
+main() {
+    parse_command_line "$@"
+    
+    get_dependencies_names
+    for dependency in "${dependencies_names[@]}"; do
+        index=$(get_dependency_index ${dependency})
+        echo "Updating dependency ${dependency}"
+        current_version=$(yq eval ".dependencies[${index}].version" ${chart})
+        repo=$(yq eval ".dependencies[${index}].repository" ${chart})
+        upstream_version=$(get_upstream_dependency_version ${repo} ${dependency})
+        if [ "${upstream_version}" != "not found" ]; then
+            if V ${upstream_version} '>' ${current_version}; then
+                echo "Updating ${dependency} to ${upstream_version}..."
+                yq e ".dependencies[${index}].version = \"$upstream_version\"" -i ${chart}
+            else
+                echo "No need to update ${dependency}..."
+            fi
+        fi
+    done
+    
+    if [ "${keep_version}" -eq "0" ]; then
+        echo "Updating chart version to ${new_version}..."
+        yq e ".version = \"${new_version}\"" -i ${chart}
+        yq e ".appVersion = \"${new_version}\"" -i ${chart}
+    fi
+    exit 0
+}
+
+main "$@"
