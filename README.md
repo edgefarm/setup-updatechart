@@ -4,7 +4,7 @@ Update a helm chart dependencies and own version
 **Usage**
 
 ```sh
-- uses: edgefarm/setup-updatechart@v1
+- uses: edgefarm/setup-updatechart@v1.1.0
 - run: updateChart <args>
 ```
 
