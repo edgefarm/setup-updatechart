@@ -1,5 +1,5 @@
 # setup-updatechart
-Update a helm chart dependencies and own version
+Update helm chart dependencies that are managed within the same repository and own version
 
 **Usage**
 
