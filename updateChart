@@ -14,12 +14,29 @@ local_charts_dir=
 # returns the index of the dependency in the chart
 # $1 - dependency name
 # if the dependency is not found, returns -1
-get_dependency_index() {
-    local dependency=${1}
-    index=$(yq eval '.dependencies[].name' ${chart} | grep -rn "\b${dependency}\b" - | cut -f1 -d":")
-    index=$((${index} - 1))
-    echo ${index}
+function get_dependency_index() {
+    local target_dependency=$1 # Specify the dependency you are searching for
+
+    local index=0
+    while true; do
+        local current_dependency=$(yq e ".dependencies[$index].name" $chart) # Get name of current dependency
+
+        if [ "$current_dependency" = "$target_dependency" ]; then
+            echo $index
+            return 0
+        fi
+
+        if [ "$current_dependency" = "null" ]; then # If current dependency name is null, we've reached end of array
+            echo "-1"
+            return 1
+        fi
+
+        index=$((index + 1)) # Increment the index
+    done
 }
+
+# Execute the function
+# get_dependency_index "<path_to_your_yaml_file>" "<target_dependency>"
 
 # checks if the dependency helm chart is managed locally
 # $1 - index of dependency in the chart
@@ -47,7 +64,7 @@ get_dependencies_names() {
 }
 
 show_help() {
-cat << EOF
+    cat <<EOF
 Usage: $(basename "$0") <options>
     -h, --help               Display this help
     -c, --chart              Chart.yaml to update
@@ -64,88 +81,88 @@ parse_command_line() {
         show_help
         exit 1
     fi
-    
+
     while :; do
         case "${1:-}" in
-            -h|--help)
+        -h | --help)
+            show_help
+            exit
+            ;;
+        -c | --chart)
+            if [[ -n "${2:-}" ]]; then
+                chart="$2"
+                shift
+            else
+                echo "ERROR: '--chart' cannot be empty." >&2
                 show_help
-                exit
+                exit 1
+            fi
             ;;
-            -c|--chart)
-                if [[ -n "${2:-}" ]]; then
-                    chart="$2"
-                    shift
-                else
-                    echo "ERROR: '--chart' cannot be empty." >&2
-                    show_help
-                    exit 1
-                fi
+        -v | --new-version)
+            if [[ -n "${2:-}" ]]; then
+                new_version="$2"
+                shift
+            else
+                echo "ERROR: '--new-version' cannot be empty." >&2
+                show_help
+                exit 1
+            fi
             ;;
-            -v | --new-version)
-                if [[ -n "${2:-}" ]]; then
-                    new_version="$2"
-                    shift
-                else
-                    echo "ERROR: '--new-version' cannot be empty." >&2
-                    show_help
-                    exit 1
-                fi
+        -r | --repository)
+            if [[ -n "${2:-}" ]]; then
+                repository="$2"
+                shift
+            else
+                echo "ERROR: '--repository' cannot be empty." >&2
+                show_help
+                exit 1
+            fi
             ;;
-            -r | --repository)
-                if [[ -n "${2:-}" ]]; then
-                    repository="$2"
-                    shift
-                else
-                    echo "ERROR: '--repository' cannot be empty." >&2
-                    show_help
-                    exit 1
-                fi
+        -l | --local-charts-dir)
+            if [[ -n "${2:-}" ]]; then
+                local_charts_dir="$2"
+                shift
+            else
+                echo "ERROR: '--local-charts-dir' cannot be empty." >&2
+                show_help
+                exit 1
+            fi
             ;;
-            -l | --local-charts-dir)
-                if [[ -n "${2:-}" ]]; then
-                    local_charts_dir="$2"
-                    shift
-                else
-                    echo "ERROR: '--local-charts-dir' cannot be empty." >&2
-                    show_help
-                    exit 1
-                fi
+        -k | --keep-version)
+            keep_version="1"
             ;;
-            -k | --keep-version)
-                keep_version="1"
-            ;;
-            *)
-                break
+        *)
+            break
             ;;
         esac
         shift
     done
-    
+
     if [ "${keep_version}" -eq "0" ] && [ -z "${new_version}" ]; then
         echo "ERROR: '--new-version' cannot be empty." >&2
         show_help
         exit 1
     fi
-    
+
 }
 
 main() {
     parse_command_line "$@"
-    
+
     get_dependencies_names
     for dependency in "${dependencies_names[@]}"; do
         index=$(get_dependency_index ${dependency})
         loc_dep=$(local_dependency ${index} ${local_charts_dir})
-        
+
         if [[ ${loc_dep} == "true" ]]; then
             echo "Dependency '${dependency}' updated to version ${new_version}"
             yq eval '.dependencies['${index}'].version = "'${new_version}'"' -i ${chart}
         else
             echo "Dependency '${dependency}' managed externally. Skipping."
         fi
-        
+
     done
-    
+
     if [ "${keep_version}" -eq "0" ]; then
         echo "Updating chart version to ${new_version}..."
         yq e ".version = \"${new_version}\"" -i ${chart}
