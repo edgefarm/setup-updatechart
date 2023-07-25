@@ -4,13 +4,11 @@ Update helm chart dependencies that are managed within the same repository and o
 **Usage**
 
 ```sh
-      - name: Setup updatechart
-        uses: edgefarm/setup-updatechart@v1.1.0
-
-      - name: Setup yq
-        uses: mikefarah/yq@v4.34.2
-    
-      - run: updateChart <args>
+- name: Setup updatechart
+  uses: edgefarm/setup-updatechart@v1.1.0
+- name: Setup yq
+  uses: mikefarah/yq@v4.34.2   
+- run: updateChart <args>
 ```
 
 
